@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import random
 import sqlite3
 import sys
 from dataclasses import dataclass
@@ -10,6 +11,9 @@ from pathlib import Path
 
 WORD_LENGTH = 5
 MAX_TURNS = 6
+DEFAULT_GUESSABILITY_SCORE = 5
+MIN_ANSWER_SCORE = 5
+ANSWER_WEIGHT_EXPONENT = 3
 
 RESET = "\x1b[0m"
 DIM = "\x1b[2m"
@@ -42,7 +46,8 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS words (
-            word TEXT PRIMARY KEY
+            word TEXT PRIMARY KEY,
+            guessability_score INTEGER NOT NULL DEFAULT 5
         );
 
         CREATE TABLE IF NOT EXISTS games (
@@ -56,24 +61,70 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    word_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(words)").fetchall()}
+    if "guessability_score" not in word_columns:
+        conn.execute("ALTER TABLE words ADD COLUMN guessability_score INTEGER NOT NULL DEFAULT 5")
+    conn.execute(
+        """
+        UPDATE words
+        SET guessability_score = ?
+        WHERE guessability_score IS NULL OR guessability_score < 1 OR guessability_score > 10
+        """,
+        (DEFAULT_GUESSABILITY_SCORE,),
+    )
     conn.commit()
+
+
+def parse_word_repository_line(line: str, line_number: int) -> tuple[str, int] | None:
+    token = line.strip().lower()
+    if not token:
+        return None
+
+    parts = [part.strip() for part in token.split(",", 1)]
+    word = parts[0]
+    if len(word) != WORD_LENGTH or not word.isalpha():
+        raise ValueError(f"Invalid repository word on line {line_number}: {line!r}")
+
+    if len(parts) == 1:
+        return (word, DEFAULT_GUESSABILITY_SCORE)
+
+    score_text = parts[1]
+    if not score_text:
+        raise ValueError(f"Missing score on line {line_number}: {line!r}")
+
+    try:
+        score = int(score_text)
+    except ValueError as exc:
+        raise ValueError(f"Invalid score on line {line_number}: {line!r}") from exc
+
+    if score < 1 or score > 10:
+        raise ValueError(f"Score out of range on line {line_number}: {line!r}")
+
+    return (word, score)
 
 
 def load_word_repository(conn: sqlite3.Connection, repository_path: Path) -> int:
     if not repository_path.exists():
         raise FileNotFoundError(f"Word repository not found: {repository_path}")
 
-    valid_words: list[str] = []
-    for line in repository_path.read_text(encoding="utf-8").splitlines():
-        word = line.strip().lower()
-        if len(word) == WORD_LENGTH and word.isalpha():
-            valid_words.append(word)
+    valid_words: list[tuple[str, int]] = []
+    for line_number, line in enumerate(repository_path.read_text(encoding="utf-8").splitlines(), start=1):
+        parsed = parse_word_repository_line(line, line_number)
+        if parsed is not None:
+            valid_words.append(parsed)
 
     if not valid_words:
-        raise ValueError("Word repository has no valid 5-letter words.")
+        raise ValueError("Word repository has no valid 5-letter words with optional scores.")
 
     before = conn.total_changes
-    conn.executemany("INSERT OR IGNORE INTO words(word) VALUES (?)", ((word,) for word in valid_words))
+    conn.executemany(
+        """
+        INSERT INTO words(word, guessability_score)
+        VALUES (?, ?)
+        ON CONFLICT(word) DO UPDATE SET guessability_score = excluded.guessability_score
+        """,
+        valid_words,
+    )
     conn.commit()
     return conn.total_changes - before
 
@@ -91,25 +142,38 @@ def get_remaining_word_count(conn: sqlite3.Connection) -> int:
 
 
 def reserve_next_word(conn: sqlite3.Connection) -> ReservedGame | None:
-    row = conn.execute(
+    rows = conn.execute(
         """
-        SELECT w.word
+        SELECT w.word, w.guessability_score
         FROM words w
         LEFT JOIN games g ON g.word = w.word
         WHERE g.word IS NULL
-        ORDER BY RANDOM()
-        LIMIT 1
-        """
-    ).fetchone()
-    if row is None:
+          AND w.guessability_score >= ?
+        """,
+        (MIN_ANSWER_SCORE,),
+    ).fetchall()
+    if not rows:
+        rows = conn.execute(
+            """
+            SELECT w.word, w.guessability_score
+            FROM words w
+            LEFT JOIN games g ON g.word = w.word
+            WHERE g.word IS NULL
+            """
+        ).fetchall()
+    if not rows:
         return None
+
+    words = [str(row["word"]) for row in rows]
+    weights = [max(1, int(row["guessability_score"])) ** ANSWER_WEIGHT_EXPONENT for row in rows]
+    selected_word = random.choices(words, weights=weights, k=1)[0]
 
     cursor = conn.execute(
         "INSERT INTO games(word, started_at) VALUES (?, ?)",
-        (row["word"], utc_now()),
+        (selected_word, utc_now()),
     )
     conn.commit()
-    return ReservedGame(game_id=int(cursor.lastrowid), word=row["word"])
+    return ReservedGame(game_id=int(cursor.lastrowid), word=selected_word)
 
 
 def load_valid_guess_words(conn: sqlite3.Connection) -> set[str]:
