@@ -42,6 +42,7 @@ Running `python wordler.py` opens an in-terminal menu where you can:
 ## Notes
 
 - Games ended early (Ctrl+C / `quit`) count as failed so the selected word still stays non-repeating.
+- Guesses must be valid repository words; invalid guesses are rejected and do not consume a turn.
 - End-of-game prompt lets you **play again**, return to **main menu**, or **quit**.
 - Add more words by appending new 5-letter words to `word_repository.txt`, then run:
 

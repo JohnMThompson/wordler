@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -111,6 +112,11 @@ def reserve_next_word(conn: sqlite3.Connection) -> ReservedGame | None:
     return ReservedGame(game_id=int(cursor.lastrowid), word=row["word"])
 
 
+def load_valid_guess_words(conn: sqlite3.Connection) -> set[str]:
+    rows = conn.execute("SELECT word FROM words").fetchall()
+    return {str(row["word"]) for row in rows}
+
+
 def finalize_game(
     conn: sqlite3.Connection,
     game_id: int,
@@ -205,10 +211,20 @@ def print_keyboard(key_status: dict[str, str]) -> None:
     print()
 
 
-def prompt_guess(turn: int) -> str | None:
+def replace_previous_prompt_line() -> None:
+    if not sys.stdout.isatty():
+        return
+    print("\x1b[1A\r\x1b[2K", end="", flush=True)
+
+
+def prompt_guess(turn: int, valid_guess_words: set[str]) -> str | None:
+    error_message = ""
     while True:
+        prompt = f"Guess {turn}/{MAX_TURNS} > "
+        if error_message:
+            prompt = f"Guess {turn}/{MAX_TURNS} > {error_message} "
         try:
-            raw = input(f"Guess {turn}/{MAX_TURNS} > ")
+            raw = input(prompt)
         except (EOFError, KeyboardInterrupt):
             print()
             return None
@@ -217,10 +233,16 @@ def prompt_guess(turn: int) -> str | None:
         if guess in {"quit", "exit", ":q"}:
             return None
         if len(guess) != WORD_LENGTH:
-            print(f"Please enter exactly {WORD_LENGTH} letters.")
+            error_message = f"Use exactly {WORD_LENGTH} letters."
+            replace_previous_prompt_line()
             continue
         if not guess.isalpha():
-            print("Letters only, please.")
+            error_message = "Letters only."
+            replace_previous_prompt_line()
+            continue
+        if guess not in valid_guess_words:
+            error_message = "Not in word list. Try another guess."
+            replace_previous_prompt_line()
             continue
         return guess
 
@@ -250,6 +272,7 @@ def play_game(conn: sqlite3.Connection) -> str:
         return "menu"
 
     secret = reserved.word
+    valid_guess_words = load_valid_guess_words(conn)
     attempts: list[tuple[str, list[str]]] = []
     key_status: dict[str, str] = {}
 
@@ -262,8 +285,9 @@ def play_game(conn: sqlite3.Connection) -> str:
     solved = False
     turns_taken: int | None = None
 
-    for turn in range(1, MAX_TURNS + 1):
-        guess = prompt_guess(turn)
+    turn = 1
+    while turn <= MAX_TURNS:
+        guess = prompt_guess(turn, valid_guess_words)
         if guess is None:
             print("Game ended early — recorded as failed to keep words non-repeating.")
             break
@@ -282,6 +306,7 @@ def play_game(conn: sqlite3.Connection) -> str:
             solved = True
             turns_taken = turn
             break
+        turn += 1
 
     if solved:
         print(f"🎉 Nice! You solved it in {turns_taken} turn(s).")
