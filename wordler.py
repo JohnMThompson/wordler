@@ -48,6 +48,7 @@ STATUS_PRIORITY = {"absent": 0, "present": 1, "correct": 2}
 class ReservedGame:
     game_id: int
     word: str
+    used_quality_fallback: bool = False
 
 
 def utc_now() -> str:
@@ -263,7 +264,9 @@ def reserve_next_word(conn: sqlite3.Connection) -> ReservedGame | None:
         """,
         (MIN_ANSWER_SCORE,),
     ).fetchall()
+    used_quality_fallback = False
     if not rows:
+        used_quality_fallback = True
         rows = conn.execute(
             """
             SELECT w.word, w.guessability_score
@@ -284,7 +287,7 @@ def reserve_next_word(conn: sqlite3.Connection) -> ReservedGame | None:
         (selected_word, utc_now()),
     )
     conn.commit()
-    return ReservedGame(game_id=int(cursor.lastrowid), word=selected_word)
+    return ReservedGame(game_id=int(cursor.lastrowid), word=selected_word, used_quality_fallback=used_quality_fallback)
 
 
 def load_valid_guess_words(conn: sqlite3.Connection) -> set[str]:
@@ -466,6 +469,8 @@ def play_game(conn: sqlite3.Connection) -> str:
 
     print_header()
     print(f"🎯 Fresh puzzle loaded. {get_remaining_word_count(conn)} unused words remain after this game.")
+    if reserved.used_quality_fallback:
+        print("⚠️  High-quality words exhausted — this puzzle may be more obscure than usual.")
     print()
     print_board(attempts)
     print_keyboard(key_status)
