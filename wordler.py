@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 import sqlite3
 import sys
@@ -396,8 +397,8 @@ def percent_whole(count: int, total: int) -> int:
     return int(round(percent(count, total)))
 
 
-def percent_bar(percent_value: int, width: int = 24) -> str:
-    filled = int(round((percent_value / 100) * width))
+def percent_bar(percent_value: int, axis_max: int, width: int = 24) -> str:
+    filled = int(round((percent_value / axis_max) * width))
     filled = max(0, min(width, filled))
     return ("█" * filled) + ("·" * (width - filled))
 
@@ -432,9 +433,12 @@ def print_stats(conn: sqlite3.Connection) -> None:
 
     outcomes.append(("Failed", failed_games))
 
-    for label, count in outcomes:
-        pct = percent_whole(count, total_games)
-        bar = percent_bar(pct)
+    pcts = [percent_whole(count, total_games) for _, count in outcomes]
+    max_pct = max(pcts) if pcts else 0
+    axis_max = math.ceil((max_pct + 5) / 10) * 10
+
+    for (label, count), pct in zip(outcomes, pcts):
+        bar = percent_bar(pct, axis_max)
         print(f"{label:<16} {count:>5} {pct:>7}%  {bar}")
 
     print()
