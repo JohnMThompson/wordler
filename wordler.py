@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import random
 import sqlite3
@@ -109,11 +110,24 @@ def _migration_04(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_05(conn: sqlite3.Connection) -> None:
+    """Create settings table for key-value app state."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+
+
 MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
     (1, "create_words_table", _migration_01),
     (2, "create_games_table", _migration_02),
     (3, "add_guessability_score_column", _migration_03),
     (4, "fix_invalid_guessability_scores", _migration_04),
+    (5, "create_settings_table", _migration_05),
 ]
 
 
@@ -191,8 +205,16 @@ def load_word_repository(conn: sqlite3.Connection, repository_path: Path) -> int
     if not repository_path.exists():
         raise FileNotFoundError(f"Word repository not found: {repository_path}")
 
+    repo_bytes = repository_path.read_bytes()
+    current_hash = hashlib.sha256(repo_bytes).hexdigest()
+    stored = conn.execute(
+        "SELECT value FROM settings WHERE key = 'word_repo_hash'"
+    ).fetchone()
+    if stored and stored["value"] == current_hash:
+        return 0  # file unchanged, skip reload
+
     valid_words: list[tuple[str, int]] = []
-    for line_number, line in enumerate(repository_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_number, line in enumerate(repo_bytes.decode("utf-8").splitlines(), start=1):
         parsed = parse_word_repository_line(line, line_number)
         if parsed is not None:
             valid_words.append(parsed)
@@ -209,8 +231,13 @@ def load_word_repository(conn: sqlite3.Connection, repository_path: Path) -> int
         """,
         valid_words,
     )
+    word_changes = conn.total_changes - before
+    conn.execute(
+        "INSERT OR REPLACE INTO settings(key, value) VALUES ('word_repo_hash', ?)",
+        (current_hash,),
+    )
     conn.commit()
-    return conn.total_changes - before
+    return word_changes
 
 
 def get_remaining_word_count(conn: sqlite3.Connection) -> int:
