@@ -22,6 +22,17 @@ GREEN = "\x1b[30;42m"
 YELLOW = "\x1b[30;43m"
 GRAY = "\x1b[37;100m"
 
+# Bar chart colors (foreground only, indexed by outcome: solved-in-1..6, then failed)
+BAR_COLORS = [
+    "\x1b[92m",  # Solved in 1 - bright green
+    "\x1b[32m",  # Solved in 2 - green
+    "\x1b[32m",  # Solved in 3 - green
+    "\x1b[33m",  # Solved in 4 - yellow
+    "\x1b[33m",  # Solved in 5 - yellow
+    "\x1b[31m",  # Solved in 6 - red
+    "\x1b[91m",  # Failed      - bright red
+]
+
 STATUS_PRIORITY = {"absent": 0, "present": 1, "correct": 2}
 
 
@@ -397,10 +408,16 @@ def percent_whole(count: int, total: int) -> int:
     return int(round(percent(count, total)))
 
 
-def percent_bar(percent_value: int, axis_max: int, width: int = 24) -> str:
+def percent_bar(percent_value: int, axis_max: int, color: str = "", width: int = 24) -> str:
     filled = int(round((percent_value / axis_max) * width))
     filled = max(0, min(width, filled))
-    return ("█" * filled) + ("·" * (width - filled))
+    bar = ""
+    if filled:
+        bar += f"{color}{'█' * filled}{RESET}"
+    empty = width - filled
+    if empty:
+        bar += f"{DIM}{'·' * empty}{RESET}"
+    return bar
 
 
 def print_stats(conn: sqlite3.Connection) -> None:
@@ -437,8 +454,8 @@ def print_stats(conn: sqlite3.Connection) -> None:
     max_pct = max(pcts) if pcts else 0
     axis_max = math.ceil((max_pct + 5) / 10) * 10
 
-    for (label, count), pct in zip(outcomes, pcts):
-        bar = percent_bar(pct, axis_max)
+    for i, ((label, count), pct) in enumerate(zip(outcomes, pcts)):
+        bar = percent_bar(pct, axis_max, BAR_COLORS[i] if i < len(BAR_COLORS) else "")
         print(f"{label:<16} {count:>5} {pct:>7}%  {bar}")
 
     print()
