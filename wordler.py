@@ -455,8 +455,17 @@ def print_stats(conn: sqlite3.Connection) -> None:
     max_pct = max(pcts) if pcts else 0
     axis_max = math.ceil((max_pct + 5) / 10) * 10
 
-    for i, ((label, count), pct) in enumerate(zip(outcomes, pcts)):
-        bar = percent_bar(pct, axis_max, BAR_COLORS[i] if i < len(BAR_COLORS) else "")
+    # Map each unique pct to a color index: highest % → green (index 0), lowest → brick red (last)
+    unique_pcts = sorted(set(pcts), reverse=True)
+    num_unique = len(unique_pcts)
+    num_colors = len(BAR_COLORS)
+    pct_to_color: dict[int, str] = {}
+    for rank, p in enumerate(unique_pcts):
+        color_idx = int(round(rank / (num_unique - 1) * (num_colors - 1))) if num_unique > 1 else 0
+        pct_to_color[p] = BAR_COLORS[color_idx]
+
+    for (label, count), pct in zip(outcomes, pcts):
+        bar = percent_bar(pct, axis_max, pct_to_color[pct])
         print(f"{label:<16} {count:>5} {pct:>7}%  {bar}")
 
     print()
