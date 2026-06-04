@@ -35,6 +35,11 @@ BAR_COLORS = [
     "\x1b[38;5;124m",  # Failed      - brick red
 ]
 
+# Strip all color/formatting codes when stdout is not a TTY (e.g. piped output)
+if not sys.stdout.isatty():
+    RESET = DIM = GREEN = YELLOW = GRAY = ""
+    BAR_COLORS = [""] * len(BAR_COLORS)
+
 STATUS_PRIORITY = {"absent": 0, "present": 1, "correct": 2}
 
 
