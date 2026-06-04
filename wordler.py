@@ -6,6 +6,7 @@ import math
 import random
 import sqlite3
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,14 +56,22 @@ def connect_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def init_db(conn: sqlite3.Connection) -> None:
-    conn.executescript(
+def _migration_01(conn: sqlite3.Connection) -> None:
+    """Create words table."""
+    conn.execute(
         """
         CREATE TABLE IF NOT EXISTS words (
             word TEXT PRIMARY KEY,
             guessability_score INTEGER NOT NULL DEFAULT 5
-        );
+        )
+        """
+    )
 
+
+def _migration_02(conn: sqlite3.Connection) -> None:
+    """Create games table."""
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS games (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             word TEXT NOT NULL UNIQUE REFERENCES words(word),
@@ -71,12 +80,20 @@ def init_db(conn: sqlite3.Connection) -> None:
             solved INTEGER CHECK (solved IN (0, 1) OR solved IS NULL),
             turns_taken INTEGER CHECK (turns_taken BETWEEN 1 AND 6 OR turns_taken IS NULL),
             guesses_used INTEGER CHECK (guesses_used BETWEEN 0 AND 6 OR guesses_used IS NULL)
-        );
+        )
         """
     )
-    word_columns = {str(row["name"]) for row in conn.execute("PRAGMA table_info(words)").fetchall()}
-    if "guessability_score" not in word_columns:
+
+
+def _migration_03(conn: sqlite3.Connection) -> None:
+    """Add guessability_score column to words if missing (backward compat)."""
+    cols = {str(row["name"]) for row in conn.execute("PRAGMA table_info(words)").fetchall()}
+    if "guessability_score" not in cols:
         conn.execute("ALTER TABLE words ADD COLUMN guessability_score INTEGER NOT NULL DEFAULT 5")
+
+
+def _migration_04(conn: sqlite3.Connection) -> None:
+    """Fix any out-of-range guessability scores."""
     conn.execute(
         """
         UPDATE words
@@ -85,7 +102,56 @@ def init_db(conn: sqlite3.Connection) -> None:
         """,
         (DEFAULT_GUESSABILITY_SCORE,),
     )
+
+
+MIGRATIONS: list[tuple[int, str, Callable[[sqlite3.Connection], None]]] = [
+    (1, "create_words_table", _migration_01),
+    (2, "create_games_table", _migration_02),
+    (3, "add_guessability_score_column", _migration_03),
+    (4, "fix_invalid_guessability_scores", _migration_04),
+]
+
+
+def run_migrations(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+        """
+    )
     conn.commit()
+
+    applied = {
+        int(row["version"])
+        for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+    }
+    max_known = MIGRATIONS[-1][0]
+
+    if applied:
+        db_max = max(applied)
+        if db_max > max_known:
+            raise RuntimeError(
+                f"Database schema version {db_max} is newer than this app supports "
+                f"(max known: {max_known}). Please update the app."
+            )
+        expected = set(range(1, db_max + 1))
+        if applied != expected:
+            raise RuntimeError(
+                f"Inconsistent migration history: expected versions {sorted(expected)}, "
+                f"found {sorted(applied)}."
+            )
+
+    for version, _name, fn in MIGRATIONS:
+        if version in applied:
+            continue
+        fn(conn)
+        conn.execute(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+            (version, utc_now()),
+        )
+        conn.commit()
 
 
 def parse_word_repository_line(line: str, line_number: int) -> tuple[str, int] | None:
@@ -560,7 +626,11 @@ def main() -> None:
     db_path = root / ".wordler" / "wordler.db"
 
     with connect_db(db_path) as conn:
-        init_db(conn)
+        try:
+            run_migrations(conn)
+        except RuntimeError as exc:
+            print(f"Database error: {exc}", file=sys.stderr)
+            sys.exit(1)
         inserted = load_word_repository(conn, repository_path)
 
         if args.command == "sync-words":
