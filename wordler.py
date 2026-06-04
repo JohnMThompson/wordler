@@ -22,15 +22,16 @@ GREEN = "\x1b[30;42m"
 YELLOW = "\x1b[30;43m"
 GRAY = "\x1b[37;100m"
 
-# Bar chart colors (foreground only, indexed by outcome: solved-in-1..6, then failed)
+# Bar chart colors (256-color foreground, indexed by outcome: solved-in-1..6, then failed)
+# Uses muted earthy tones: sage green → amber → burnt orange → brick red
 BAR_COLORS = [
-    "\x1b[92m",  # Solved in 1 - bright green
-    "\x1b[32m",  # Solved in 2 - green
-    "\x1b[32m",  # Solved in 3 - green
-    "\x1b[33m",  # Solved in 4 - yellow
-    "\x1b[33m",  # Solved in 5 - yellow
-    "\x1b[31m",  # Solved in 6 - red
-    "\x1b[91m",  # Failed      - bright red
+    "\x1b[38;5;65m",   # Solved in 1 - sage green
+    "\x1b[38;5;65m",   # Solved in 2 - sage green
+    "\x1b[38;5;71m",   # Solved in 3 - medium green
+    "\x1b[38;5;136m",  # Solved in 4 - amber/gold
+    "\x1b[38;5;172m",  # Solved in 5 - muted orange
+    "\x1b[38;5;130m",  # Solved in 6 - burnt orange
+    "\x1b[38;5;124m",  # Failed      - brick red
 ]
 
 STATUS_PRIORITY = {"absent": 0, "present": 1, "correct": 2}
