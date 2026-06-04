@@ -512,6 +512,32 @@ def play_game(conn: sqlite3.Connection) -> str:
     return prompt_post_game_action()
 
 
+def get_streaks(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Return (current_streak, best_streak) based on completed game history."""
+    rows = conn.execute(
+        "SELECT solved FROM games WHERE solved IS NOT NULL ORDER BY id ASC"
+    ).fetchall()
+
+    best = 0
+    current = 0
+    for row in rows:
+        if bool(row["solved"]):
+            current += 1
+            best = max(best, current)
+        else:
+            current = 0
+
+    # current now reflects the tail of the list; recalculate from the end
+    current = 0
+    for row in reversed(rows):
+        if bool(row["solved"]):
+            current += 1
+        else:
+            break
+
+    return current, best
+
+
 def percent(count: int, total: int) -> float:
     return (count / total * 100.0) if total else 0.0
 
@@ -543,9 +569,12 @@ def print_stats(conn: sqlite3.Connection) -> None:
     solved_games = int(solved_row["count"])
     failed_games = total_games - solved_games
 
+    current_streak, best_streak = get_streaks(conn)
+
     print("📊 Wordler stats")
     print(f"Completed games: {total_games}")
-    print(f"Success rate: {percent_whole(solved_games, total_games)}%")
+    print(f"Success rate:    {percent_whole(solved_games, total_games)}%")
+    print(f"Current streak:  {current_streak}  |  Best streak: {best_streak}")
     print()
     print(f"{'Outcome':<16} {'Count':>5} {'Percent':>8}  Bar")
     print("-" * 58)
