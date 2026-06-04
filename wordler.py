@@ -392,6 +392,16 @@ def replace_previous_prompt_line() -> None:
     print("\x1b[1A\r\x1b[2K", end="", flush=True)
 
 
+def prompt_quit_confirm() -> bool:
+    """Ask the user to confirm quitting mid-game (counts as failed). Returns True if confirmed."""
+    try:
+        raw = input("⚠️  Quit now? This game will count as failed. [y/N] > ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return True
+    return raw.strip().lower() in {"y", "yes"}
+
+
 def prompt_guess(turn: int, valid_guess_words: set[str]) -> str | None:
     error_message = ""
     while True:
@@ -406,7 +416,10 @@ def prompt_guess(turn: int, valid_guess_words: set[str]) -> str | None:
 
         guess = raw.strip().lower()
         if guess in {"quit", "exit", ":q"}:
-            return None
+            if prompt_quit_confirm():
+                return None
+            replace_previous_prompt_line()
+            continue
         if len(guess) != WORD_LENGTH:
             error_message = f"Use exactly {WORD_LENGTH} letters."
             replace_previous_prompt_line()
