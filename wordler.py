@@ -576,9 +576,16 @@ def print_stats(conn: sqlite3.Connection) -> None:
 
     current_streak, best_streak = get_streaks(conn)
 
+    avg_row = conn.execute(
+        "SELECT AVG(turns_taken) AS avg_turns FROM games WHERE solved = 1"
+    ).fetchone()
+    avg_turns = avg_row["avg_turns"]
+
     print("📊 Wordler stats")
     print(f"Completed games: {total_games}")
     print(f"Success rate:    {percent_whole(solved_games, total_games)}%")
+    if avg_turns is not None:
+        print(f"Avg solve:       {avg_turns:.1f} turns")
     print(f"Current streak:  {current_streak}  |  Best streak: {best_streak}")
     print()
     print(f"{'Outcome':<16} {'Count':>5} {'Percent':>8}  Bar")
