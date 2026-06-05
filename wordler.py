@@ -55,6 +55,12 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def clear_terminal() -> None:
+    if not sys.stdout.isatty():
+        return
+    print("\x1b[H\x1b[2J\x1b[3J", end="", flush=True)
+
+
 def connect_db(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -456,9 +462,33 @@ def prompt_post_game_action() -> str:
         print("Please choose P, M, or Q.")
 
 
+def pause_for_main_menu() -> None:
+    try:
+        input("Press Enter to return to the main menu > ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+
+def print_game_screen(
+    conn: sqlite3.Connection,
+    reserved: ReservedGame,
+    attempts: list[tuple[str, list[str]]],
+    key_status: dict[str, str],
+) -> None:
+    clear_terminal()
+    print_header()
+    print(f"🎯 Fresh puzzle loaded. {get_remaining_word_count(conn)} unused words remain after this game.")
+    if reserved.used_quality_fallback:
+        print("⚠️  High-quality words exhausted — this puzzle may be more obscure than usual.")
+    print()
+    print_board(attempts)
+    print_keyboard(key_status)
+
+
 def play_game(conn: sqlite3.Connection) -> str:
     reserved = reserve_next_word(conn)
     if reserved is None:
+        clear_terminal()
         print("No unused words remain. Add more 5-letter words to word_repository.txt.")
         return "menu"
 
@@ -467,13 +497,7 @@ def play_game(conn: sqlite3.Connection) -> str:
     attempts: list[tuple[str, list[str]]] = []
     key_status: dict[str, str] = {}
 
-    print_header()
-    print(f"🎯 Fresh puzzle loaded. {get_remaining_word_count(conn)} unused words remain after this game.")
-    if reserved.used_quality_fallback:
-        print("⚠️  High-quality words exhausted — this puzzle may be more obscure than usual.")
-    print()
-    print_board(attempts)
-    print_keyboard(key_status)
+    print_game_screen(conn, reserved, attempts, key_status)
 
     solved = False
     turns_taken: int | None = None
@@ -491,9 +515,7 @@ def play_game(conn: sqlite3.Connection) -> str:
         for letter, status in zip(guess, statuses):
             key_status[letter] = combine_key_status(key_status.get(letter), status)
 
-        print()
-        print_board(attempts)
-        print_keyboard(key_status)
+        print_game_screen(conn, reserved, attempts, key_status)
 
         if guess == secret:
             solved = True
@@ -673,6 +695,7 @@ def prompt_main_menu_choice() -> str:
 
 
 def run_terminal_menu(conn: sqlite3.Connection) -> None:
+    clear_terminal()
     print("✨ Welcome to Wordler ✨")
     while True:
         choice = prompt_main_menu_choice()
@@ -682,15 +705,26 @@ def run_terminal_menu(conn: sqlite3.Connection) -> None:
                 if next_action == "play":
                     continue
                 if next_action == "menu":
+                    clear_terminal()
+                    print("✨ Welcome to Wordler ✨")
                     break
                 return
         elif choice == "2":
-            print()
+            clear_terminal()
             print_stats(conn)
-        elif choice == "3":
             print()
+            pause_for_main_menu()
+            clear_terminal()
+            print("✨ Welcome to Wordler ✨")
+        elif choice == "3":
+            clear_terminal()
             print_history(conn, limit=10)
+            print()
+            pause_for_main_menu()
+            clear_terminal()
+            print("✨ Welcome to Wordler ✨")
         else:
+            clear_terminal()
             print("Bye! 👋")
             return
 
