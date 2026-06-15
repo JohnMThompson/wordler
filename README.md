@@ -27,6 +27,7 @@ Running `python wordler.py` opens an in-terminal menu where you can:
 - Start a new game
 - View stats
 - View last 10 games
+- Toggle hard mode
 - Quit
 
 ## What it includes
@@ -34,6 +35,8 @@ Running `python wordler.py` opens an in-terminal menu where you can:
 - **Word repository:** `word_repository.txt` expanded from [`tabatkins/wordle-list`](https://github.com/tabatkins/wordle-list) (14,855 5-letter words), now stored as `word,score`
 - **Clean terminal UI:** colored tiles, keyboard feedback, screen clearing between views, and redraws after each guess
 - **Terminal navigation:** one command opens menu-driven navigation with clean transitions between game, stats, history, and menu screens
+- **Number hotkeys in menus:** menu prompts use numbered options (main menu, settings, post-game actions)
+- **Hard mode toggle:** optional rules enforce revealed hints on future guesses (green letters stay fixed; yellow hints must be reused)
 - **Persistent tracking:** SQLite database at `.wordler/wordler.db`
 - **No repetition:** once a word is used for a game, it is never reused
 - **Guessability scoring:** each word has a 1-10 score; higher-scored words are more likely to be selected as answers

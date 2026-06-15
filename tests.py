@@ -8,6 +8,9 @@ from pathlib import Path
 from wordler import (
     DEFAULT_GUESSABILITY_SCORE,
     get_streaks,
+    is_hard_mode_enabled,
+    set_hard_mode_enabled,
+    validate_hard_mode_guess,
     parse_word_repository_line,
     percent_bar,
     percent_whole,
@@ -244,6 +247,45 @@ class TestGetStreaks(unittest.TestCase):
         current, best = get_streaks(conn)
         self.assertEqual(current, 0)
         self.assertEqual(best, 0)
+
+
+class TestHardMode(unittest.TestCase):
+    def test_hard_mode_defaults_off(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        run_migrations(conn)
+        self.assertFalse(is_hard_mode_enabled(conn))
+
+    def test_hard_mode_setting_persists(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        run_migrations(conn)
+        set_hard_mode_enabled(conn, True)
+        self.assertTrue(is_hard_mode_enabled(conn))
+        set_hard_mode_enabled(conn, False)
+        self.assertFalse(is_hard_mode_enabled(conn))
+
+    def test_hard_mode_requires_correct_position(self):
+        attempts = [("crane", ["correct", "absent", "absent", "absent", "absent"])]
+        message = validate_hard_mode_guess("brink", attempts)
+        self.assertEqual(message, "Hard mode: position 1 must be C.")
+
+    def test_hard_mode_requires_present_letter_somewhere(self):
+        attempts = [("raise", ["absent", "present", "absent", "absent", "absent"])]
+        message = validate_hard_mode_guess("cloud", attempts)
+        self.assertEqual(message, "Hard mode: guess must include A at least 1 time.")
+
+    def test_hard_mode_disallows_known_yellow_position(self):
+        attempts = [("raise", ["absent", "present", "absent", "absent", "absent"])]
+        message = validate_hard_mode_guess("cabin", attempts)
+        self.assertEqual(message, "Hard mode: A cannot be in position 2.")
+
+    def test_hard_mode_tracks_duplicate_letter_minimums(self):
+        attempts = [("abaca", ["correct", "absent", "present", "absent", "absent"])]
+        message = validate_hard_mode_guess("adobe", attempts)
+        self.assertEqual(message, "Hard mode: guess must include A at least 2 times.")
 
 
 if __name__ == "__main__":

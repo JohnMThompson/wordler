@@ -7,6 +7,7 @@ import math
 import random
 import sqlite3
 import sys
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ MAX_TURNS = 6
 DEFAULT_GUESSABILITY_SCORE = 5
 MIN_ANSWER_SCORE = 5
 ANSWER_WEIGHT_EXPONENT = 3
+HARD_MODE_SETTING_KEY = "hard_mode_enabled"
 
 RESET = "\x1b[0m"
 DIM = "\x1b[2m"
@@ -301,6 +303,25 @@ def load_valid_guess_words(conn: sqlite3.Connection) -> set[str]:
     return {str(row["word"]) for row in rows}
 
 
+def is_hard_mode_enabled(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT value FROM settings WHERE key = ?",
+        (HARD_MODE_SETTING_KEY,),
+    ).fetchone()
+    if row is None:
+        return False
+    value = str(row["value"]).strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def set_hard_mode_enabled(conn: sqlite3.Connection, enabled: bool) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)",
+        (HARD_MODE_SETTING_KEY, "1" if enabled else "0"),
+    )
+    conn.commit()
+
+
 def finalize_game(
     conn: sqlite3.Connection,
     game_id: int,
@@ -363,10 +384,11 @@ def render_empty_row() -> str:
     return " ".join(f"{DIM}[ ]{RESET}" for _ in range(WORD_LENGTH))
 
 
-def print_header() -> None:
+def print_header(hard_mode_enabled: bool) -> None:
     print()
     print("✨🌸  W O R D L E R  🌸✨")
     print("Guess the 5-letter word in 6 tries.")
+    print(f"Mode: {'Hard' if hard_mode_enabled else 'Normal'}")
     print("Type 'quit' to end a game early.")
     print()
 
@@ -404,14 +426,67 @@ def replace_previous_prompt_line() -> None:
 def prompt_quit_confirm() -> bool:
     """Ask the user to confirm quitting mid-game (counts as failed). Returns True if confirmed."""
     try:
-        raw = input("⚠️  Quit now? This game will count as failed. [y/N] > ")
+        raw = input("⚠️  Quit now? This game will count as failed. 1) Yes  2) No > ")
     except (EOFError, KeyboardInterrupt):
         print()
         return True
-    return raw.strip().lower() in {"y", "yes"}
+    return raw.strip().lower() in {"1", "y", "yes"}
 
 
-def prompt_guess(turn: int, valid_guess_words: set[str]) -> str | None:
+def get_hard_mode_rules(
+    attempts: list[tuple[str, list[str]]],
+) -> tuple[dict[int, str], dict[str, int], dict[str, set[int]]]:
+    required_positions: dict[int, str] = {}
+    min_letter_counts: dict[str, int] = {}
+    banned_positions: dict[str, set[int]] = defaultdict(set)
+
+    for guess, statuses in attempts:
+        counts_this_guess: dict[str, int] = {}
+        for idx, (letter, status) in enumerate(zip(guess, statuses)):
+            if status == "correct":
+                required_positions[idx] = letter
+                counts_this_guess[letter] = counts_this_guess.get(letter, 0) + 1
+            elif status == "present":
+                banned_positions[letter].add(idx)
+                counts_this_guess[letter] = counts_this_guess.get(letter, 0) + 1
+
+        for letter, count in counts_this_guess.items():
+            min_letter_counts[letter] = max(min_letter_counts.get(letter, 0), count)
+
+    return required_positions, min_letter_counts, banned_positions
+
+
+def validate_hard_mode_guess(guess: str, attempts: list[tuple[str, list[str]]]) -> str | None:
+    required_positions, min_letter_counts, banned_positions = get_hard_mode_rules(attempts)
+
+    for idx, required_letter in sorted(required_positions.items()):
+        if guess[idx] != required_letter:
+            return f"Hard mode: position {idx + 1} must be {required_letter.upper()}."
+
+    for letter in sorted(min_letter_counts):
+        required_count = min_letter_counts[letter]
+        actual_count = guess.count(letter)
+        if actual_count < required_count:
+            noun = "time" if required_count == 1 else "times"
+            return (
+                f"Hard mode: guess must include {letter.upper()} at least "
+                f"{required_count} {noun}."
+            )
+
+    for letter in sorted(banned_positions):
+        for idx in sorted(banned_positions[letter]):
+            if guess[idx] == letter:
+                return f"Hard mode: {letter.upper()} cannot be in position {idx + 1}."
+
+    return None
+
+
+def prompt_guess(
+    turn: int,
+    valid_guess_words: set[str],
+    attempts: list[tuple[str, list[str]]],
+    hard_mode_enabled: bool,
+) -> str | None:
     error_message = ""
     while True:
         prompt = f"Guess {turn}/{MAX_TURNS} > "
@@ -441,25 +516,31 @@ def prompt_guess(turn: int, valid_guess_words: set[str]) -> str | None:
             error_message = "Not in word list. Try another guess."
             replace_previous_prompt_line()
             continue
+        if hard_mode_enabled:
+            hard_mode_error = validate_hard_mode_guess(guess, attempts)
+            if hard_mode_error:
+                error_message = hard_mode_error
+                replace_previous_prompt_line()
+                continue
         return guess
 
 
 def prompt_post_game_action() -> str:
     while True:
         try:
-            raw = input("Next: [P]lay again, [M]ain menu, or [Q]uit > ")
+            raw = input("Next: 1) Play again  2) Main menu  3) Quit > ")
         except (EOFError, KeyboardInterrupt):
             print()
             return "quit"
 
         choice = raw.strip().lower()
-        if choice in {"", "p", "play", "again"}:
+        if choice in {"", "1", "p", "play", "again"}:
             return "play"
-        if choice in {"m", "menu", "main"}:
+        if choice in {"2", "m", "menu", "main"}:
             return "menu"
-        if choice in {"q", "quit", "exit"}:
+        if choice in {"3", "q", "quit", "exit"}:
             return "quit"
-        print("Please choose P, M, or Q.")
+        print("Please choose 1, 2, or 3.")
 
 
 def pause_for_main_menu() -> None:
@@ -474,9 +555,10 @@ def print_game_screen(
     reserved: ReservedGame,
     attempts: list[tuple[str, list[str]]],
     key_status: dict[str, str],
+    hard_mode_enabled: bool,
 ) -> None:
     clear_terminal()
-    print_header()
+    print_header(hard_mode_enabled)
     print(f"🎯 Fresh puzzle loaded. {get_remaining_word_count(conn)} unused words remain after this game.")
     if reserved.used_quality_fallback:
         print("⚠️  High-quality words exhausted — this puzzle may be more obscure than usual.")
@@ -485,7 +567,7 @@ def print_game_screen(
     print_keyboard(key_status)
 
 
-def play_game(conn: sqlite3.Connection) -> str:
+def play_game(conn: sqlite3.Connection, hard_mode_enabled: bool) -> str:
     reserved = reserve_next_word(conn)
     if reserved is None:
         clear_terminal()
@@ -497,14 +579,14 @@ def play_game(conn: sqlite3.Connection) -> str:
     attempts: list[tuple[str, list[str]]] = []
     key_status: dict[str, str] = {}
 
-    print_game_screen(conn, reserved, attempts, key_status)
+    print_game_screen(conn, reserved, attempts, key_status, hard_mode_enabled)
 
     solved = False
     turns_taken: int | None = None
 
     turn = 1
     while turn <= MAX_TURNS:
-        guess = prompt_guess(turn, valid_guess_words)
+        guess = prompt_guess(turn, valid_guess_words, attempts, hard_mode_enabled)
         if guess is None:
             print("Game ended early — recorded as failed to keep words non-repeating.")
             break
@@ -515,7 +597,7 @@ def play_game(conn: sqlite3.Connection) -> str:
         for letter, status in zip(guess, statuses):
             key_status[letter] = combine_key_status(key_status.get(letter), status)
 
-        print_game_screen(conn, reserved, attempts, key_status)
+        print_game_screen(conn, reserved, attempts, key_status, hard_mode_enabled)
 
         if guess == secret:
             solved = True
@@ -682,26 +764,44 @@ def prompt_main_menu_choice() -> str:
     print("1) New game")
     print("2) View stats")
     print("3) View last 10")
-    print("4) Quit")
+    print("4) Settings")
+    print("5) Quit")
     while True:
         try:
-            choice = input("Choose 1-4 > ").strip()
+            choice = input("Choose 1-5 > ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
-            return "4"
-        if choice in {"1", "2", "3", "4"}:
+            return "5"
+        if choice in {"1", "2", "3", "4", "5"}:
             return choice
-        print("Please enter 1, 2, 3, or 4.")
+        print("Please enter 1, 2, 3, 4, or 5.")
+
+
+def prompt_settings_menu_choice(hard_mode_enabled: bool) -> str:
+    print()
+    print("⚙️  Settings")
+    print(f"1) Toggle hard mode ({'ON' if hard_mode_enabled else 'OFF'})")
+    print("2) Back to main menu")
+    while True:
+        try:
+            choice = input("Choose 1-2 > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "2"
+        if choice in {"1", "2"}:
+            return choice
+        print("Please enter 1 or 2.")
 
 
 def run_terminal_menu(conn: sqlite3.Connection) -> None:
     clear_terminal()
     print("✨ Welcome to Wordler ✨")
     while True:
+        hard_mode_enabled = is_hard_mode_enabled(conn)
         choice = prompt_main_menu_choice()
         if choice == "1":
             while True:
-                next_action = play_game(conn)
+                next_action = play_game(conn, hard_mode_enabled)
                 if next_action == "play":
                     continue
                 if next_action == "menu":
@@ -723,6 +823,20 @@ def run_terminal_menu(conn: sqlite3.Connection) -> None:
             pause_for_main_menu()
             clear_terminal()
             print("✨ Welcome to Wordler ✨")
+        elif choice == "4":
+            while True:
+                clear_terminal()
+                settings_choice = prompt_settings_menu_choice(is_hard_mode_enabled(conn))
+                if settings_choice == "1":
+                    current = is_hard_mode_enabled(conn)
+                    set_hard_mode_enabled(conn, not current)
+                    print()
+                    print(f"Hard mode {'enabled' if not current else 'disabled'}.")
+                    pause_for_main_menu()
+                    continue
+                clear_terminal()
+                print("✨ Welcome to Wordler ✨")
+                break
         else:
             clear_terminal()
             print("Bye! 👋")
