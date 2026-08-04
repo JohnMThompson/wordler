@@ -292,35 +292,33 @@ class TestAvgSolveTrend(unittest.TestCase):
     def test_chart_uses_flexible_scale_and_game_range(self):
         chart = avg_solve_chart([(3, 2.0), (4, 3.5), (5, 5.6)])
         self.assertEqual(chart[0], "Avg solve trend (solved games 3-5)")
-        self.assertEqual(len(chart), 11)
+        self.assertEqual(len(chart), 9)
         self.assertTrue(chart[1].startswith("5.96 |"))
-        self.assertTrue(chart[8].startswith("1.64 |"))
-        self.assertNotIn("*", "".join(chart))
-        self.assertTrue(any(character in "".join(chart) for character in "╭╮╰╯"))
-        self.assertFalse(any(character in "".join(chart) for character in "┬┴├┤┼"))
+        self.assertTrue(chart[6].startswith("1.64 |"))
+        self.assertTrue(any("\u2800" <= character <= "\u28ff" for character in "".join(chart)))
 
     def test_chart_exposes_small_game_to_game_fluctuations(self):
         chart = avg_solve_chart([(10, 3.00), (11, 3.03), (12, 2.97)])
-        point_rows = [
-            next(
-                i
-                for i, line in enumerate(chart[1:9])
-                if line[6 + column] in "─╱╲╭╮╰╯"
-            )
-            for column in range(3)
+        braille_rows = [
+            i
+            for i, line in enumerate(chart[1:7])
+            if any("\u2800" <= character <= "\u28ff" for character in line[6:])
         ]
-        self.assertEqual(len(set(point_rows)), 3)
-        self.assertLess(float(chart[1].split()[0]) - float(chart[8].split()[0]), 0.2)
+        self.assertGreater(len(braille_rows), 1)
+        self.assertLess(float(chart[1].split()[0]) - float(chart[6].split()[0]), 0.2)
 
     def test_flat_chart_uses_minimum_range(self):
         chart = avg_solve_chart([(1, 3.0), (2, 3.0)])
         self.assertEqual(float(chart[1].split()[0]), 3.05)
-        self.assertEqual(float(chart[8].split()[0]), 2.95)
-        self.assertIn("──", "".join(chart))
+        self.assertEqual(float(chart[6].split()[0]), 2.95)
 
-    def test_chart_draws_vertical_segments_between_points(self):
+    def test_chart_connects_distant_points(self):
         chart = avg_solve_chart([(1, 2.0), (2, 4.0)])
-        self.assertIn("│", "".join(chart))
+        occupied_rows = sum(
+            any("\u2800" <= character <= "\u28ff" for character in line[6:])
+            for line in chart[1:7]
+        )
+        self.assertEqual(occupied_rows, 6)
 
     def test_single_point_chart_does_not_duplicate_axis_label(self):
         chart = avg_solve_chart([(1, 2.0)])

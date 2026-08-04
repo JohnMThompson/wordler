@@ -20,7 +20,7 @@ MIN_ANSWER_SCORE = 5
 ANSWER_WEIGHT_EXPONENT = 3
 HARD_MODE_SETTING_KEY = "hard_mode_enabled"
 AVG_SOLVE_TREND_LIMIT = 25
-AVG_SOLVE_CHART_HEIGHT = 8
+AVG_SOLVE_CHART_HEIGHT = 6
 AVG_SOLVE_CHART_MIN_RANGE = 0.1
 
 RESET = "\x1b[0m"
@@ -710,44 +710,51 @@ def avg_solve_chart(trend: list[tuple[int, float]]) -> list[str]:
         axis_max = min(float(MAX_TURNS), axis_min + AVG_SOLVE_CHART_MIN_RANGE)
         axis_min = max(1.0, axis_max - AVG_SOLVE_CHART_MIN_RANGE)
 
-    row_step = (axis_max - axis_min) / (AVG_SOLVE_CHART_HEIGHT - 1)
-    point_rows = [
-        round((axis_max - avg_turns) / row_step)
-        for avg_turns in averages
+    dot_width = max(1, len(trend) * 2 - 1)
+    dot_height = AVG_SOLVE_CHART_HEIGHT * 4
+    points = [
+        (
+            index * 2,
+            round((axis_max - avg_turns) / (axis_max - axis_min) * (dot_height - 1)),
+        )
+        for index, avg_turns in enumerate(averages)
     ]
-    plot = [[" " for _ in trend] for _ in range(AVG_SOLVE_CHART_HEIGHT)]
-    if len(point_rows) == 1:
-        plot[point_rows[0]][0] = "─"
+    dots: set[tuple[int, int]] = set()
+    if len(points) == 1:
+        dots.add(points[0])
     else:
-        for column, point_row in enumerate(point_rows):
-            previous_row = point_rows[column - 1] if column > 0 else None
-            next_row = point_rows[column + 1] if column + 1 < len(point_rows) else None
-            left_delta = point_row - previous_row if previous_row is not None else 0
-            right_delta = next_row - point_row if next_row is not None else 0
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            steps = max(abs(x1 - x0), abs(y1 - y0))
+            for step in range(steps + 1):
+                dots.add(
+                    (
+                        round(x0 + (x1 - x0) * step / steps),
+                        round(y0 + (y1 - y0) * step / steps),
+                    )
+                )
 
-            if abs(left_delta) <= 1 and abs(right_delta) <= 1:
-                net_delta = right_delta or left_delta
-                plot[point_row][column] = "╲" if net_delta > 0 else "╱" if net_delta < 0 else "─"
-            elif right_delta > 0:
-                plot[point_row][column] = "╮"
-            elif right_delta < 0:
-                plot[point_row][column] = "╯"
-            elif left_delta > 0:
-                plot[point_row][column] = "╰"
-            elif left_delta < 0:
-                plot[point_row][column] = "╭"
-            else:
-                plot[point_row][column] = "─"
-
-            if next_row is not None:
-                for row in range(min(point_row, next_row) + 1, max(point_row, next_row)):
-                    plot[row][column] = "│"
+    braille_bits = (
+        (0x01, 0x08),
+        (0x02, 0x10),
+        (0x04, 0x20),
+        (0x40, 0x80),
+    )
+    plot: list[str] = []
+    for cell_row in range(AVG_SOLVE_CHART_HEIGHT):
+        cells = []
+        for cell_column in range((dot_width + 1) // 2):
+            pattern = 0
+            for dot_row in range(4):
+                for dot_column in range(2):
+                    if (cell_column * 2 + dot_column, cell_row * 4 + dot_row) in dots:
+                        pattern |= braille_bits[dot_row][dot_column]
+            cells.append(chr(0x2800 + pattern) if pattern else " ")
+        plot.append("".join(cells))
 
     lines = [f"Avg solve trend (solved games {min_game}-{max_game})"]
     for row_index in range(AVG_SOLVE_CHART_HEIGHT):
-        turn_level = axis_max - row_index * row_step
-        points = "".join(plot[row_index])
-        lines.append(f"{turn_level:>4.2f} |{points}")
+        turn_level = axis_max - row_index * (axis_max - axis_min) / (AVG_SOLVE_CHART_HEIGHT - 1)
+        lines.append(f"{turn_level:>4.2f} |{plot[row_index]}")
     lines.append(f"     +{'-' * len(trend)}")
     if len(trend) == 1:
         lines.append(f"       {min_game}")
