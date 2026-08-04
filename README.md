@@ -40,7 +40,7 @@ Running `python wordler.py` opens an in-terminal menu where you can:
 - **Persistent tracking:** SQLite database at `.wordler/wordler.db`
 - **No repetition:** once a word is used for a game, it is never reused
 - **Guessability scoring:** each word has a 1-10 score; higher-scored words are more likely to be selected as answers
-- **Stats view:** success rate plus bar-chart distribution and per-outcome percentages:
+- **Stats view:** success rate, a cumulative average-solve trend for the latest 25 solved games, plus bar-chart distribution and per-outcome percentages:
   - solved in 1
   - solved in 2
   - solved in 3

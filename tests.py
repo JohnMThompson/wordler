@@ -7,6 +7,8 @@ from pathlib import Path
 
 from wordler import (
     DEFAULT_GUESSABILITY_SCORE,
+    avg_solve_chart,
+    get_avg_solve_trend,
     get_streaks,
     is_hard_mode_enabled,
     set_hard_mode_enabled,
@@ -247,6 +249,59 @@ class TestGetStreaks(unittest.TestCase):
         current, best = get_streaks(conn)
         self.assertEqual(current, 0)
         self.assertEqual(best, 0)
+
+
+class TestAvgSolveTrend(unittest.TestCase):
+    def _make_conn_with_turns(self, turns: list[int | None]):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON;")
+        run_migrations(conn)
+        conn.executemany(
+            "INSERT INTO words(word, guessability_score) VALUES (?, ?)",
+            [(f"w{i:04d}", 5) for i in range(len(turns))],
+        )
+        for i, turns_taken in enumerate(turns):
+            solved = turns_taken is not None
+            conn.execute(
+                """INSERT INTO games(word, started_at, completed_at, solved, turns_taken, guesses_used)
+                   VALUES (?, '2024-01-01T00:00:00+00:00', '2024-01-01T00:01:00+00:00', ?, ?, ?)""",
+                (f"w{i:04d}", int(solved), turns_taken, turns_taken or 6),
+            )
+        conn.commit()
+        return conn
+
+    def test_calculates_cumulative_average_and_excludes_failures(self):
+        conn = self._make_conn_with_turns([2, None, 4, 3])
+        self.assertEqual(
+            get_avg_solve_trend(conn),
+            [(1, 2.0), (2, 3.0), (3, 3.0)],
+        )
+
+    def test_limits_output_but_keeps_all_time_cumulative_average(self):
+        conn = self._make_conn_with_turns([1] * 5 + [6] * 25)
+        trend = get_avg_solve_trend(conn)
+        self.assertEqual(len(trend), 25)
+        self.assertEqual(trend[0][0], 6)
+        self.assertEqual(trend[-1], (30, 155 / 30))
+
+    def test_non_positive_limit_returns_no_points(self):
+        conn = self._make_conn_with_turns([2, 4])
+        self.assertEqual(get_avg_solve_trend(conn, limit=0), [])
+
+    def test_chart_uses_fixed_turn_scale_and_game_range(self):
+        chart = avg_solve_chart([(3, 2.0), (4, 3.5), (5, 5.6)])
+        self.assertEqual(chart[0], "Avg solve trend (solved games 3-5)")
+        self.assertTrue(chart[1].startswith("6 |"))
+        self.assertTrue(chart[6].startswith("1 |"))
+        self.assertEqual(sum(line.count("*") for line in chart), 3)
+
+    def test_single_point_chart_does_not_duplicate_axis_label(self):
+        chart = avg_solve_chart([(1, 2.0)])
+        self.assertEqual(chart[-1], "    1")
+
+    def test_empty_chart_has_no_lines(self):
+        self.assertEqual(avg_solve_chart([]), [])
 
 
 class TestHardMode(unittest.TestCase):

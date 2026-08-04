@@ -19,6 +19,7 @@ DEFAULT_GUESSABILITY_SCORE = 5
 MIN_ANSWER_SCORE = 5
 ANSWER_WEIGHT_EXPONENT = 3
 HARD_MODE_SETTING_KEY = "hard_mode_enabled"
+AVG_SOLVE_TREND_LIMIT = 25
 
 RESET = "\x1b[0m"
 DIM = "\x1b[2m"
@@ -667,6 +668,50 @@ def percent_bar(percent_value: int, axis_max: int, color: str = "", width: int =
     return bar
 
 
+def get_avg_solve_trend(
+    conn: sqlite3.Connection,
+    limit: int = AVG_SOLVE_TREND_LIMIT,
+) -> list[tuple[int, float]]:
+    rows = conn.execute(
+        """
+        SELECT id, turns_taken
+        FROM games
+        WHERE solved = 1
+        ORDER BY id ASC
+        """
+    ).fetchall()
+
+    cumulative_turns = 0
+    trend: list[tuple[int, float]] = []
+    for solved_game_number, row in enumerate(rows, start=1):
+        cumulative_turns += int(row["turns_taken"])
+        trend.append((solved_game_number, cumulative_turns / solved_game_number))
+
+    return trend[-limit:] if limit > 0 else []
+
+
+def avg_solve_chart(trend: list[tuple[int, float]]) -> list[str]:
+    if not trend:
+        return []
+
+    min_game = trend[0][0]
+    max_game = trend[-1][0]
+    lines = [f"Avg solve trend (solved games {min_game}-{max_game})"]
+    for turn_level in range(MAX_TURNS, 0, -1):
+        points = "".join(
+            "*" if round(avg_turns) == turn_level else " "
+            for _, avg_turns in trend
+        )
+        lines.append(f"{turn_level} |{points}")
+    lines.append(f"  +{'-' * len(trend)}")
+    if len(trend) == 1:
+        lines.append(f"    {min_game}")
+    else:
+        label_gap = max(1, len(trend) - len(str(min_game)) - len(str(max_game)))
+        lines.append(f"    {min_game}{' ' * label_gap}{max_game}")
+    return lines
+
+
 def print_stats(conn: sqlite3.Connection) -> None:
     total_row = conn.execute("SELECT COUNT(*) AS count FROM games WHERE solved IS NOT NULL").fetchone()
     total_games = int(total_row["count"])
@@ -691,6 +736,11 @@ def print_stats(conn: sqlite3.Connection) -> None:
     if avg_turns is not None:
         print(f"Avg solve:       {avg_turns:.2f} turns")
     print(f"Current streak:  {current_streak}  |  Best streak: {best_streak}")
+    trend = get_avg_solve_trend(conn)
+    if trend:
+        print()
+        for line in avg_solve_chart(trend):
+            print(line)
     print()
     print(f"{'Outcome':<16} {'Count':>5} {'Percent':>8}  Bar")
     print("-" * 58)
