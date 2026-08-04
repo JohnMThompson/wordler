@@ -295,12 +295,17 @@ class TestAvgSolveTrend(unittest.TestCase):
         self.assertEqual(len(chart), 11)
         self.assertTrue(chart[1].startswith("5.96 |"))
         self.assertTrue(chart[8].startswith("1.64 |"))
-        self.assertEqual(sum(line.count("*") for line in chart), 3)
+        self.assertNotIn("*", "".join(chart))
+        self.assertTrue(any(character in "".join(chart) for character in "┌┐└┘"))
 
     def test_chart_exposes_small_game_to_game_fluctuations(self):
         chart = avg_solve_chart([(10, 3.00), (11, 3.03), (12, 2.97)])
         point_rows = [
-            next(i for i, line in enumerate(chart[1:9]) if line[6 + column] == "*")
+            next(
+                i
+                for i, line in enumerate(chart[1:9])
+                if line[6 + column] in "─┌┐└┘┬┴├┤┼"
+            )
             for column in range(3)
         ]
         self.assertEqual(len(set(point_rows)), 3)
@@ -310,6 +315,11 @@ class TestAvgSolveTrend(unittest.TestCase):
         chart = avg_solve_chart([(1, 3.0), (2, 3.0)])
         self.assertEqual(float(chart[1].split()[0]), 3.05)
         self.assertEqual(float(chart[8].split()[0]), 2.95)
+        self.assertIn("──", "".join(chart))
+
+    def test_chart_draws_vertical_segments_between_points(self):
+        chart = avg_solve_chart([(1, 2.0), (2, 4.0)])
+        self.assertIn("│", "".join(chart))
 
     def test_single_point_chart_does_not_duplicate_axis_label(self):
         chart = avg_solve_chart([(1, 2.0)])

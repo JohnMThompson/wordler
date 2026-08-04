@@ -715,14 +715,46 @@ def avg_solve_chart(trend: list[tuple[int, float]]) -> list[str]:
         round((axis_max - avg_turns) / row_step)
         for avg_turns in averages
     ]
+    plot = [[" " for _ in trend] for _ in range(AVG_SOLVE_CHART_HEIGHT)]
+    if len(point_rows) == 1:
+        plot[point_rows[0]][0] = "─"
+    else:
+        for column, point_row in enumerate(point_rows):
+            previous_row = point_rows[column - 1] if column > 0 else None
+            next_row = point_rows[column + 1] if column + 1 < len(point_rows) else None
+            connections: set[str] = set()
+            for direction, neighbor_row in (("left", previous_row), ("right", next_row)):
+                if neighbor_row is None:
+                    continue
+                connections.add(direction)
+                if neighbor_row < point_row:
+                    connections.add("up")
+                elif neighbor_row > point_row:
+                    connections.add("down")
+            glyphs = {
+                frozenset({"left"}): "─",
+                frozenset({"right"}): "─",
+                frozenset({"left", "right"}): "─",
+                frozenset({"right", "up"}): "└",
+                frozenset({"right", "down"}): "┌",
+                frozenset({"left", "up"}): "┘",
+                frozenset({"left", "down"}): "┐",
+                frozenset({"left", "right", "up"}): "┴",
+                frozenset({"left", "right", "down"}): "┬",
+                frozenset({"left", "up", "down"}): "┤",
+                frozenset({"right", "up", "down"}): "├",
+                frozenset({"left", "right", "up", "down"}): "┼",
+            }
+            plot[point_row][column] = glyphs.get(frozenset(connections), "│")
+
+            if next_row is not None:
+                for row in range(min(point_row, next_row) + 1, max(point_row, next_row)):
+                    plot[row][column] = "│"
 
     lines = [f"Avg solve trend (solved games {min_game}-{max_game})"]
     for row_index in range(AVG_SOLVE_CHART_HEIGHT):
         turn_level = axis_max - row_index * row_step
-        points = "".join(
-            "*" if point_row == row_index else " "
-            for point_row in point_rows
-        )
+        points = "".join(plot[row_index])
         lines.append(f"{turn_level:>4.2f} |{points}")
     lines.append(f"     +{'-' * len(trend)}")
     if len(trend) == 1:
