@@ -296,7 +296,8 @@ class TestAvgSolveTrend(unittest.TestCase):
         self.assertTrue(chart[1].startswith("5.96 |"))
         self.assertTrue(chart[8].startswith("1.64 |"))
         self.assertNotIn("*", "".join(chart))
-        self.assertTrue(any(character in "".join(chart) for character in "┌┐└┘"))
+        self.assertTrue(any(character in "".join(chart) for character in "╭╮╰╯"))
+        self.assertFalse(any(character in "".join(chart) for character in "┬┴├┤┼"))
 
     def test_chart_exposes_small_game_to_game_fluctuations(self):
         chart = avg_solve_chart([(10, 3.00), (11, 3.03), (12, 2.97)])
@@ -304,7 +305,7 @@ class TestAvgSolveTrend(unittest.TestCase):
             next(
                 i
                 for i, line in enumerate(chart[1:9])
-                if line[6 + column] in "─┌┐└┘┬┴├┤┼"
+                if line[6 + column] in "─╱╲╭╮╰╯"
             )
             for column in range(3)
         ]

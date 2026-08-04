@@ -722,30 +722,22 @@ def avg_solve_chart(trend: list[tuple[int, float]]) -> list[str]:
         for column, point_row in enumerate(point_rows):
             previous_row = point_rows[column - 1] if column > 0 else None
             next_row = point_rows[column + 1] if column + 1 < len(point_rows) else None
-            connections: set[str] = set()
-            for direction, neighbor_row in (("left", previous_row), ("right", next_row)):
-                if neighbor_row is None:
-                    continue
-                connections.add(direction)
-                if neighbor_row < point_row:
-                    connections.add("up")
-                elif neighbor_row > point_row:
-                    connections.add("down")
-            glyphs = {
-                frozenset({"left"}): "─",
-                frozenset({"right"}): "─",
-                frozenset({"left", "right"}): "─",
-                frozenset({"right", "up"}): "└",
-                frozenset({"right", "down"}): "┌",
-                frozenset({"left", "up"}): "┘",
-                frozenset({"left", "down"}): "┐",
-                frozenset({"left", "right", "up"}): "┴",
-                frozenset({"left", "right", "down"}): "┬",
-                frozenset({"left", "up", "down"}): "┤",
-                frozenset({"right", "up", "down"}): "├",
-                frozenset({"left", "right", "up", "down"}): "┼",
-            }
-            plot[point_row][column] = glyphs.get(frozenset(connections), "│")
+            left_delta = point_row - previous_row if previous_row is not None else 0
+            right_delta = next_row - point_row if next_row is not None else 0
+
+            if abs(left_delta) <= 1 and abs(right_delta) <= 1:
+                net_delta = right_delta or left_delta
+                plot[point_row][column] = "╲" if net_delta > 0 else "╱" if net_delta < 0 else "─"
+            elif right_delta > 0:
+                plot[point_row][column] = "╮"
+            elif right_delta < 0:
+                plot[point_row][column] = "╯"
+            elif left_delta > 0:
+                plot[point_row][column] = "╰"
+            elif left_delta < 0:
+                plot[point_row][column] = "╭"
+            else:
+                plot[point_row][column] = "─"
 
             if next_row is not None:
                 for row in range(min(point_row, next_row) + 1, max(point_row, next_row)):
