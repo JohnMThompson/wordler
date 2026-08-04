@@ -20,6 +20,8 @@ MIN_ANSWER_SCORE = 5
 ANSWER_WEIGHT_EXPONENT = 3
 HARD_MODE_SETTING_KEY = "hard_mode_enabled"
 AVG_SOLVE_TREND_LIMIT = 25
+AVG_SOLVE_CHART_HEIGHT = 8
+AVG_SOLVE_CHART_MIN_RANGE = 0.1
 
 RESET = "\x1b[0m"
 DIM = "\x1b[2m"
@@ -696,19 +698,38 @@ def avg_solve_chart(trend: list[tuple[int, float]]) -> list[str]:
 
     min_game = trend[0][0]
     max_game = trend[-1][0]
+    averages = [avg_turns for _, avg_turns in trend]
+    data_min = min(averages)
+    data_max = max(averages)
+    padding = max((data_max - data_min) * 0.1, AVG_SOLVE_CHART_MIN_RANGE / 2)
+    axis_min = max(1.0, data_min - padding)
+    axis_max = min(float(MAX_TURNS), data_max + padding)
+    if axis_max - axis_min < AVG_SOLVE_CHART_MIN_RANGE:
+        center = (axis_min + axis_max) / 2
+        axis_min = max(1.0, center - AVG_SOLVE_CHART_MIN_RANGE / 2)
+        axis_max = min(float(MAX_TURNS), axis_min + AVG_SOLVE_CHART_MIN_RANGE)
+        axis_min = max(1.0, axis_max - AVG_SOLVE_CHART_MIN_RANGE)
+
+    row_step = (axis_max - axis_min) / (AVG_SOLVE_CHART_HEIGHT - 1)
+    point_rows = [
+        round((axis_max - avg_turns) / row_step)
+        for avg_turns in averages
+    ]
+
     lines = [f"Avg solve trend (solved games {min_game}-{max_game})"]
-    for turn_level in range(MAX_TURNS, 0, -1):
+    for row_index in range(AVG_SOLVE_CHART_HEIGHT):
+        turn_level = axis_max - row_index * row_step
         points = "".join(
-            "*" if round(avg_turns) == turn_level else " "
-            for _, avg_turns in trend
+            "*" if point_row == row_index else " "
+            for point_row in point_rows
         )
-        lines.append(f"{turn_level} |{points}")
-    lines.append(f"  +{'-' * len(trend)}")
+        lines.append(f"{turn_level:>4.2f} |{points}")
+    lines.append(f"     +{'-' * len(trend)}")
     if len(trend) == 1:
-        lines.append(f"    {min_game}")
+        lines.append(f"       {min_game}")
     else:
         label_gap = max(1, len(trend) - len(str(min_game)) - len(str(max_game)))
-        lines.append(f"    {min_game}{' ' * label_gap}{max_game}")
+        lines.append(f"       {min_game}{' ' * label_gap}{max_game}")
     return lines
 
 
